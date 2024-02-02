@@ -1,0 +1,13 @@
+recall_preset:
+  description: Recall a previously stored preset position for the screen masking.
+  fields:
+    preset_number:
+      description: The number of the preset to recall.
+      example: "1"
+
+store_preset:
+  description: Store the current position of the screen masking as a preset.
+  fields:
+    preset_number:
+      description: The number of the preset where the current position should be stored.
+      example: "1"
