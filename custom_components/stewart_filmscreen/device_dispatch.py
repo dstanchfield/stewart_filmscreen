@@ -46,8 +46,16 @@ class DeviceDispatch:
         return self._cvm_client.is_connected()
 
     async def async_send_command(self, command):
-        """Cover entity class implenting motor control"""
+        """Dispatches CVM send command."""
         await self._cvm_client.async_send_command(command)
+
+    async def async_recall_preset(self, preset_number):
+        """Dispatches CVM recall preset command."""
+        await self._cvm_client.async_recall_preset(preset_number)
+
+    async def async_store_preset(self, preset_number):
+        """Dispatches CVM store preset command."""
+        await self._cvm_client.async_store_preset(preset_number)
 
     def close(self):
         """Closed CVM client and performs cleanup."""
