@@ -10,7 +10,7 @@
   "issue_tracker": "https://github.com/dstanchfield/stewart_filmscreen/issues",
   "iot_class": "local_push",
   "requirements": [
-    "git+https://github.com/dstanchfield/stewartfilmscreenclient@v1.0.0#stewartfilmscreenclient==1.0.0"
+    "git+https://github.com/dstanchfield/stewartfilmscreenclient@v1.0.3#stewartfilmscreenclient==1.0.3"
   ],
-  "version": "1.0.0"
+  "version": "1.0.1"
 }
