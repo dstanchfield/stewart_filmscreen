@@ -16,9 +16,10 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 import voluptuous as vol
 
-from stewartfilmscreenclient import StewartFilmscreenClient
+from stewartfilmscreenclient import StewartFilmscreenClient, StewartFilmscreenProtocol
 
 from .const import DOMAIN, ATTR_MANUFACTURER, ATTR_MODEL
+from .device_dispatch import DeviceDispatch
 from .exceptions import CannotConnect, InvalidAuth
 
 _LOGGER = logging.getLogger(__name__)
@@ -45,6 +46,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     password = config[CONF_PASSWORD]
 
     cvm_client = StewartFilmscreenClient(host, port, username, password)
+    dispatch = DeviceDispatch(cvm_client)
 
     try:
         auth_success = await cvm_client.async_connect()
@@ -52,7 +54,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if not auth_success:
             raise InvalidAuth
 
-        hass.data[DOMAIN][entry.entry_id] = cvm_client
+        hass.data[DOMAIN][entry.entry_id] = dispatch
     except (ConnectionRefusedError, TimeoutError) as error:
         _LOGGER.debug("Connection error: %s", error)
         raise CannotConnect from error
@@ -65,22 +67,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         model=ATTR_MODEL,
     )
 
-    await setup_custom_services(hass, cvm_client)
+    await setup_custom_services(hass, dispatch)
+    setup_ha_events(hass, dispatch)
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     return True
 
 
-async def setup_custom_services(hass: HomeAssistant, cvm_client):
+async def setup_custom_services(hass: HomeAssistant, dispatch):
     """Setup recall and store services"""
 
     async def async_handle_recall_service(service: ServiceCall):
         preset_number = service.data["preset_number"]
-        await cvm_client.async_recall_preset(preset_number)
+        await dispatch.async_recall_preset(preset_number)
 
     async def async_handle_store_service(service: ServiceCall):
         preset_number = service.data["preset_number"]
-        await cvm_client.async_store_preset(preset_number)
+        await dispatch.async_store_preset(preset_number)
 
     hass.services.async_register(
         DOMAIN,
@@ -94,11 +98,29 @@ async def setup_custom_services(hass: HomeAssistant, cvm_client):
     )
 
 
+def setup_ha_events(hass, dispatch):
+    """Setup Home Assistant events dispatched from CVM"""
+
+    async def _async_handle_dispatched_state_message(state_message):
+        if (
+            state_message.get("type") == StewartFilmscreenProtocol.TYPE_COMMAND
+            and state_message.get("command") == StewartFilmscreenProtocol.COMMAND_RECALL
+        ):
+            hass.bus.fire(
+                f"{DOMAIN}_recalled_preset",
+                {"preset_number": int(state_message.get("value"))},
+            )
+
+    dispatch.register_dispatched_state_message(
+        StewartFilmscreenProtocol.MOTOR_ALL, _async_handle_dispatched_state_message
+    )
+
+
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
-        cvm_client = hass.data[DOMAIN][entry.entry_id]
-        cvm_client.close()
+        dispatch = hass.data[DOMAIN][entry.entry_id]
+        dispatch.close()
 
         hass.data[DOMAIN].pop(entry.entry_id)
 

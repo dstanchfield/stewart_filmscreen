@@ -8,10 +8,10 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.device_registry import DeviceInfo
 
-from stewartfilmscreenclient import StewartFilmscreenClient
 from stewartfilmscreenclient.protocol import StewartFilmscreenProtocol
 
 from .const import DOMAIN, ATTR_MANUFACTURER, ATTR_MODEL
+from .device_dispatch import DeviceDispatch
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Setup Stewart Filmscreen Covers from a config entry."""
-    cvm_client = hass.data[DOMAIN][config_entry.entry_id]
+    dispatch = hass.data[DOMAIN][config_entry.entry_id]
     unique_id = config_entry.unique_id
     reverse = True
 
@@ -38,7 +38,7 @@ async def async_setup_entry(
         cover = StewartFilmscreenCoverEntity(
             unique_id,
             f"{unique_id}_{motor}",
-            cvm_client,
+            dispatch,
             motor,
             (reverse := not reverse),
         )
@@ -54,7 +54,7 @@ class StewartFilmscreenCoverEntity(CoverEntity):
         self,
         device_id: str,
         unique_id: str,
-        cvm_client: StewartFilmscreenClient,
+        dispatch: DeviceDispatch,
         motor: str,
         reverse: bool,
     ):
@@ -63,7 +63,7 @@ class StewartFilmscreenCoverEntity(CoverEntity):
         self._attr_unique_id = unique_id
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, device_id)})
 
-        self._cvm_client = cvm_client
+        self._dispatch = dispatch
         self._motor = motor
         self._reverse = reverse
 
@@ -72,25 +72,20 @@ class StewartFilmscreenCoverEntity(CoverEntity):
         self._is_opening = False
         self._position = None
 
-        # register to recieve state messages from cvm
-        self._cvm_client.register_state_message_callback(
-            self._async_handle_cvm_client_state_messages
+        # register to recieve state messages from dispatch
+        self._dispatch.register_dispatched_state_message(
+            self._motor, self._async_handle_dispatched_state_message
         )
 
     async def async_added_to_hass(self):
-        await self._cvm_client.async_send_command(
+        await self._dispatch.async_send_command(
             StewartFilmscreenProtocol.query(
                 self._motor, StewartFilmscreenProtocol.QUERY_POSITION
             )
         )
 
-    async def _async_handle_cvm_client_state_messages(self, state_message):
-        if (
-            state_message.get("type") == StewartFilmscreenProtocol.TYPE_EVENT
-            and state_message.get("motor") == self._motor
-        ):
-
-            _LOGGER.debug("Received event from CVM: %s", state_message)
+    async def _async_handle_dispatched_state_message(self, state_message):
+        if state_message.get("type") == StewartFilmscreenProtocol.TYPE_EVENT:
 
             if (
                 state_message.get(StewartFilmscreenProtocol.TYPE_EVENT)
@@ -116,6 +111,13 @@ class StewartFilmscreenCoverEntity(CoverEntity):
                 self._set_position(position)
 
             self.async_write_ha_state()
+
+        elif (
+            state_message.get("type") == StewartFilmscreenProtocol.TYPE_COMMAND
+            and state_message.get("motor") == self._motor
+        ):
+
+            _LOGGER.debug(state_message)
 
     def _set_stop(self):
         self._is_closing = False
@@ -149,15 +151,10 @@ class StewartFilmscreenCoverEntity(CoverEntity):
 
         self._position = 100 - position
 
-    async def async_will_remove_from_hass(self):
-        self._cvm_client.deregister_state_message_callback(
-            self._async_handle_cvm_client_state_messages
-        )
-
     @property
     def available(self):
         """Return if Stewart Filsmscreen CVM is available."""
-        return self._cvm_client.is_connected
+        return self._dispatch.is_connected()
 
     @property
     def name(self):
@@ -192,28 +189,28 @@ class StewartFilmscreenCoverEntity(CoverEntity):
         )
 
     async def async_open_cover(self, **kwargs):
-        """Asynchronously open the cover"""
+        """Asynchronously open the cover through dispatch."""
         command = StewartFilmscreenProtocol.COMMAND_UP
         if self._reverse:
             command = StewartFilmscreenProtocol.COMMAND_DOWN
 
-        await self._cvm_client.async_send_command(
+        await self._dispatch.async_send_command(
             StewartFilmscreenProtocol.command(self._motor, command)
         )
 
     async def async_close_cover(self, **kwargs):
-        """Asynchronously close the cover"""
+        """Asynchronously close the cover through dispatch."""
         command = StewartFilmscreenProtocol.COMMAND_DOWN
         if self._reverse:
             command = StewartFilmscreenProtocol.COMMAND_UP
 
-        await self._cvm_client.async_send_command(
+        await self._dispatch.async_send_command(
             StewartFilmscreenProtocol.command(self._motor, command)
         )
 
     async def async_stop_cover(self, **kwargs):
-        """Stop the cover movement"""
-        await self._cvm_client.async_send_command(
+        """Stop the cover movement through dispatch."""
+        await self._dispatch.async_send_command(
             StewartFilmscreenProtocol.command(
                 self._motor, StewartFilmscreenProtocol.COMMAND_STOP
             )
